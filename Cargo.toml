@@ -1,0 +1,8 @@
+[package]
+name = "idirfein_server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rocket = "0.5.1"
+ws = { package = "rocket_ws", version = "0.1.1" }
