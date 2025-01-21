@@ -4,5 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+dirs = "6.0.0"
+fast_rsync = "0.2.0"
 rocket = "0.5.1"
+serde = "1.0.217"
+serde_json = "1.0.135"
+uuid = { version = "1.11.1", features = ["serde", "v4"] }
+walkdir = "2.5.0"
 ws = { package = "rocket_ws", version = "0.1.1" }
