@@ -4,6 +4,7 @@ use crate::PREVIOUS_PREFIX;
 use fast_rsync::Signature;
 use fast_rsync::SignatureOptions;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::File;
 use std::{fs, os::unix::fs::MetadataExt, path::PathBuf};
 use walkdir::WalkDir;
@@ -11,6 +12,38 @@ use walkdir::WalkDir;
 use crate::ROOT_FOLDER_NAME;
 
 const DEFAULT_CRYPTO_HASH_SIZE: u32 = 16;
+
+pub fn get_first_sync_data() -> HashMap<String, Vec<String>> {
+    let mut list_of_paths_dict: HashMap<String, Vec<String>> = HashMap::new();
+
+    let root_dir = dirs::home_dir()
+        .expect("No Home dir found, very strange, what weird OS are you running?")
+        .join(ROOT_FOLDER_NAME);
+    let list_of_folder_ids: Vec<String> = fs::read_dir(&root_dir)
+        .unwrap()
+        .filter_map(|item| item.ok().map(|item| item.path()))
+        .filter(|item| item.is_dir())
+        .map(|item| item.file_name().unwrap().to_str().unwrap().to_string())
+        .collect();
+    list_of_folder_ids.into_iter().for_each(|folder_id| {
+        let mut all_child_paths: Vec<String> = WalkDir::new(root_dir.join(&folder_id))
+            .into_iter()
+            .filter_map(|dir_entry_result| dir_entry_result.ok())
+            .map(|dir_entry| dir_entry.into_path())
+            .filter(|filepath| filepath.is_file())
+            .map(|filepath| {
+                filepath
+                    .strip_prefix(root_dir.join(&folder_id))
+                    .expect("Path should be child of folder path")
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+        all_child_paths.sort_unstable();
+        list_of_paths_dict.insert(folder_id, all_child_paths);
+    });
+    list_of_paths_dict
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerFileRequest {

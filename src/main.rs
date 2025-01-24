@@ -11,7 +11,7 @@ use rocket::{
     response::{status::BadRequest, Redirect},
     Request,
 };
-use sync_utils::{ClientFileResponse, Filedata, SyncManager};
+use sync_utils::{get_first_sync_data, ClientFileResponse, Filedata, SyncManager};
 use ws::Message;
 
 #[macro_use]
@@ -143,6 +143,21 @@ impl<'r> FromRequest<'r> for IsInitialised {
     }
 }
 
+#[get("/first_sync?<client_id>", rank = 1)]
+fn first_sync(
+    client_id: &str,
+    _auth_token: AuthToken,
+) -> Result<Vec<u8>, rocket::response::status::Custom<&str>> {
+    if let Ok(response_bytes) = serde_json::to_vec(&get_first_sync_data()) {
+        Ok(response_bytes)
+    } else {
+        Err(rocket::response::status::Custom(
+            Status::InternalServerError,
+            "Couldn't serialise sync data",
+        ))
+    }
+}
+
 #[post("/initialise?<client_id>", data = "<initialiser>", rank = 1)]
 fn initialise_sync(
     client_id: &str,
@@ -233,7 +248,7 @@ fn rocket() -> _ {
     rocket::build()
         .mount("/", routes![redirect_to_blog])
         .mount("/loro", routes![loro_channel])
-        .mount("/sync", routes![sync_channel, initialise_sync])
+        .mount("/sync", routes![sync_channel, initialise_sync, first_sync])
         .mount(
             "/blog",
             FileServer::new("/home/leoring/blog_content/www", Options::default()),
