@@ -11,16 +11,17 @@ use rocket::{
     response::{status::BadRequest, Redirect},
     Request,
 };
-use sync_utils::{get_first_sync_data, ClientFileResponse, Filedata, SyncManager};
+use sync_utils::{get_first_sync_data, ClientFileResponse, SyncInitialiserData, SyncManager};
 use ws::Message;
 
 #[macro_use]
 extern crate rocket;
 
-const ROOT_FOLDER_NAME: &str = "idirfein_server";
-const CLIENT_FILE_LIST_FILENAME_SUFFIX: &str = "_sync_file_list.json";
-const CLIENT_FOLDER_LIST_FILENAME_SUFFIX: &str = "_sync_folder_list.json";
-const PREVIOUS_PREFIX: &str = "previous_";
+pub const ROOT_FOLDER_NAME: &str = "idirfein_server";
+pub const LAST_SYNCED_SERVER_LIST_FILENAME_SUFFIX: &str = "_last_used_server_file_list.json";
+pub const CLIENT_SYNC_INITIALISER_FILENAME_SUFFIX: &str = "_sync_initialiser.json";
+pub const CLIENT_FOLDER_LIST_FILENAME_SUFFIX: &str = "_sync_folder_list.json";
+pub const PREVIOUS_PREFIX: &str = "previous_";
 
 #[get("/", rank = 2)]
 fn redirect_to_blog() -> Redirect {
@@ -83,7 +84,7 @@ impl<'r> FromRequest<'r> for AuthToken {
     }
 }
 
-struct IsInitialised(Vec<Filedata>);
+struct IsInitialised(SyncInitialiserData);
 
 #[derive(Debug)]
 enum IsInitialisedError {
@@ -101,7 +102,9 @@ impl<'r> FromRequest<'r> for IsInitialised {
             let sync_data_path = dirs::home_dir()
                 .expect("No Home dir found, very strange, what weird OS are you running?")
                 .join(ROOT_FOLDER_NAME)
-                .join(format!("{client_id}{CLIENT_FILE_LIST_FILENAME_SUFFIX}"));
+                .join(format!(
+                    "{client_id}{CLIENT_SYNC_INITIALISER_FILENAME_SUFFIX}"
+                ));
             if sync_data_path.exists() {
                 if sync_data_path.metadata().is_ok_and(|metadata| {
                     (std::time::SystemTime::now()
@@ -114,7 +117,7 @@ impl<'r> FromRequest<'r> for IsInitialised {
                     let initialiser_data_result = fs::read_to_string(sync_data_path);
                     if let Ok(initialiser_data) = initialiser_data_result {
                         let deserialised_option =
-                            serde_json::from_str::<Vec<Filedata>>(&initialiser_data);
+                            serde_json::from_str::<SyncInitialiserData>(&initialiser_data);
                         match deserialised_option {
                             Ok(deserialised) => Outcome::Success(IsInitialised(deserialised)),
                             Err(_) => Outcome::Error((
@@ -164,16 +167,19 @@ fn initialise_sync(
     initialiser: &str,
     _auth_token: AuthToken,
 ) -> Result<Vec<u8>, BadRequest<String>> {
-    if let Ok(initialised_data) = serde_json::from_str::<(Vec<Filedata>, Vec<String>)>(initialiser)
-    {
-        let sync_manager = SyncManager::new(client_id, initialised_data.0, initialised_data.1);
-        if let Ok(serialised_file_list) = serde_json::to_string(&sync_manager.client_file_list) {
+    if let Ok(initialiser_data) = serde_json::from_str::<SyncInitialiserData>(initialiser) {
+        let sync_manager = SyncManager::new(client_id, initialiser_data);
+        if let Ok(serialised_initialiser_data) =
+            serde_json::to_string(&sync_manager.initialiser_data)
+        {
             let _ = fs::write(
                 dirs::home_dir()
                     .expect("No Home dir found, very strange, what weird OS are you running?")
                     .join(ROOT_FOLDER_NAME)
-                    .join(format!("{client_id}{CLIENT_FILE_LIST_FILENAME_SUFFIX}")),
-                &serialised_file_list,
+                    .join(format!(
+                        "{client_id}{CLIENT_SYNC_INITIALISER_FILENAME_SUFFIX}"
+                    )),
+                &serialised_initialiser_data,
             );
             if let Ok(response_bytes) = serde_json::to_vec(&sync_manager.compare_remote_file_list())
             {
@@ -189,11 +195,11 @@ fn sync_channel(
     ws: ws::WebSocket,
     client_id: String,
     _auth_token: AuthToken,
-    initialised_data: IsInitialised,
+    initialiser_data: IsInitialised,
 ) -> ws::Channel<'static> {
     use rocket::futures::{SinkExt, StreamExt};
 
-    let sync_manager = SyncManager::new(&client_id, initialised_data.0, vec![]);
+    let sync_manager = SyncManager::new(&client_id, initialiser_data.0);
     ws.channel(move |mut stream| {
         Box::pin(async move {
             while let Some(message_result) = stream.next().await {
@@ -218,9 +224,9 @@ fn sync_channel(
                     .expect("No Home dir found, very strange, what weird OS are you running?")
                     .join(ROOT_FOLDER_NAME)
                     .join(format!(
-                        "{PREVIOUS_PREFIX}{client_id}{CLIENT_FILE_LIST_FILENAME_SUFFIX}"
+                        "{PREVIOUS_PREFIX}{client_id}{LAST_SYNCED_SERVER_LIST_FILENAME_SUFFIX}"
                     )),
-                serde_json::to_string(&sync_manager.client_file_list).unwrap(),
+                serde_json::to_string(&sync_manager.server_file_list).unwrap(),
             );
             let _ = fs::write(
                 dirs::home_dir()

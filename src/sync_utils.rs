@@ -1,5 +1,5 @@
-use crate::CLIENT_FILE_LIST_FILENAME_SUFFIX;
 use crate::CLIENT_FOLDER_LIST_FILENAME_SUFFIX;
+use crate::LAST_SYNCED_SERVER_LIST_FILENAME_SUFFIX;
 use crate::PREVIOUS_PREFIX;
 use fast_rsync::Signature;
 use fast_rsync::SignatureOptions;
@@ -12,6 +12,13 @@ use walkdir::WalkDir;
 use crate::ROOT_FOLDER_NAME;
 
 const DEFAULT_CRYPTO_HASH_SIZE: u32 = 16;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncInitialiserData {
+    pub client_file_list: Vec<Filedata>,
+    pub client_ignore_list: Vec<String>,
+    pub client_ignored_remote_folders_list: Vec<String>,
+}
 
 pub fn get_first_sync_data() -> HashMap<String, Vec<String>> {
     let mut list_of_paths_dict: HashMap<String, Vec<String>> = HashMap::new();
@@ -93,16 +100,11 @@ pub struct SyncManager {
     pub server_file_list: Vec<Filedata>,
     pub previously_synced_server_file_list: Vec<Filedata>,
     pub previously_synced_list_of_folder_ids: Vec<String>,
-    pub client_file_list: Vec<Filedata>,
-    pub client_ignore_list: Vec<String>,
+    pub initialiser_data: SyncInitialiserData,
 }
 
 impl SyncManager {
-    pub fn new(
-        client_id: &str,
-        client_file_list: Vec<Filedata>,
-        client_ignore_list: Vec<String>,
-    ) -> Self {
+    pub fn new(client_id: &str, initialiser_data: SyncInitialiserData) -> Self {
         let root_dir = dirs::home_dir()
             .expect("No Home dir found, very strange, what weird OS are you running?")
             .join(ROOT_FOLDER_NAME);
@@ -118,7 +120,7 @@ impl SyncManager {
                     .expect("No Home dir found, very strange, what weird OS are you running?")
                     .join(ROOT_FOLDER_NAME)
                     .join(format!(
-                        "{PREVIOUS_PREFIX}{client_id}{CLIENT_FILE_LIST_FILENAME_SUFFIX}"
+                        "{PREVIOUS_PREFIX}{client_id}{LAST_SYNCED_SERVER_LIST_FILENAME_SUFFIX}"
                     )),
             )
             .unwrap_or_default(),
@@ -140,10 +142,9 @@ impl SyncManager {
             root_dir,
             list_of_folder_ids,
             server_file_list: vec![],
-            client_file_list,
-            client_ignore_list,
             previously_synced_server_file_list,
             previously_synced_list_of_folder_ids,
+            initialiser_data,
         };
         sync_manager.get_server_file_list();
         sync_manager
@@ -153,6 +154,12 @@ impl SyncManager {
         self.server_file_list = self
             .list_of_folder_ids
             .iter()
+            .filter(|folder_id| {
+                !self
+                    .initialiser_data
+                    .client_ignored_remote_folders_list
+                    .contains(folder_id)
+            })
             .flat_map(|folder_id| {
                 let mut all_filedata: Vec<Filedata> = WalkDir::new(self.root_dir.join(folder_id))
                     .into_iter()
@@ -162,6 +169,7 @@ impl SyncManager {
                     .filter(|filepath| {
                         filepath.to_str().is_some_and(|path_str| {
                             !self
+                                .initialiser_data
                                 .client_ignore_list
                                 .iter()
                                 .any(|ignore_list_item| path_str.contains(ignore_list_item))
@@ -200,7 +208,7 @@ impl SyncManager {
             .cloned()
             .for_each(|mut item_to_delete| {
                 item_to_delete.should_delete = true;
-                self.client_file_list.push(item_to_delete);
+                self.initialiser_data.client_file_list.push(item_to_delete);
             });
         println!("Server file list {:?}", self.server_file_list);
     }
@@ -214,15 +222,19 @@ impl SyncManager {
                 // Create each new server folder on the client
                 requests_to_send.push(ServerFileRequest::CreateFolder(id_to_create.clone()));
             });
-        self.client_file_list.iter().for_each(|client_file| {
-            if !self.list_of_folder_ids.contains(&client_file.folder_id) {
-                let _ = fs::create_dir_all(self.root_dir.join(&client_file.folder_id));
-            }
-            if client_file.should_delete {
-                self.delete_file_on_server(client_file);
-            }
-        });
-        self.client_file_list
+        self.initialiser_data
+            .client_file_list
+            .iter()
+            .for_each(|client_file| {
+                if !self.list_of_folder_ids.contains(&client_file.folder_id) {
+                    let _ = fs::create_dir_all(self.root_dir.join(&client_file.folder_id));
+                }
+                if client_file.should_delete {
+                    self.delete_file_on_server(client_file);
+                }
+            });
+        self.initialiser_data
+            .client_file_list
             .iter()
             .enumerate()
             .for_each(|(client_index, client_file)| {
@@ -283,7 +295,7 @@ impl SyncManager {
     ) -> Option<ServerFileRequest> {
         match client_file_response {
             ClientFileResponse::NewFile(file_index, file_bytes) => {
-                if let Some(client_file) = self.client_file_list.get(file_index) {
+                if let Some(client_file) = self.initialiser_data.client_file_list.get(file_index) {
                     let _ = fs::write(
                         self.root_dir
                             .join(&client_file.folder_id)
@@ -293,7 +305,7 @@ impl SyncManager {
                 }
             }
             ClientFileResponse::Signature(file_index, signature_bytes) => {
-                if let Some(client_file) = self.client_file_list.get(file_index) {
+                if let Some(client_file) = self.initialiser_data.client_file_list.get(file_index) {
                     if let Ok(signature) = Signature::deserialize(signature_bytes) {
                         let server_file_bytes = self.get_file_bytes(client_file);
                         let mut diff: Vec<u8> = vec![];
@@ -306,7 +318,7 @@ impl SyncManager {
                 }
             }
             ClientFileResponse::Diff(file_index, diff_bytes) => {
-                if let Some(client_file) = self.client_file_list.get(file_index) {
+                if let Some(client_file) = self.initialiser_data.client_file_list.get(file_index) {
                     let server_file_bytes = self.get_file_bytes(client_file);
                     let mut server_file_handle = File::create(
                         self.root_dir
