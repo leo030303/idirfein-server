@@ -18,7 +18,6 @@ use ws::Message;
 #[macro_use]
 extern crate rocket;
 
-pub const ROOT_FOLDER_NAME: &str = "/mnt/idirfein_data/idirfein_sync_data";
 pub const LAST_SYNCED_SERVER_LIST_FILENAME_SUFFIX: &str = "_last_used_server_file_list.json";
 pub const CLIENT_SYNC_INITIALISER_FILENAME_SUFFIX: &str = "_sync_initialiser.json";
 pub const CLIENT_FOLDER_LIST_FILENAME_SUFFIX: &str = "_sync_folder_list.json";
@@ -100,7 +99,11 @@ impl<'r> FromRequest<'r> for IsInitialised {
 
     async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         if let Some(Ok(client_id)) = req.query_value::<&str>("client_id") {
-            let sync_data_path = PathBuf::from(ROOT_FOLDER_NAME).join(format!(
+            let sync_data_path = PathBuf::from(
+                std::env::var("IDIRFEIN_ROOT_FOLDER")
+                    .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
+            )
+            .join(format!(
                 "{client_id}{CLIENT_SYNC_INITIALISER_FILENAME_SUFFIX}"
             ));
             if sync_data_path.exists() {
@@ -171,7 +174,11 @@ fn initialise_sync(
             serde_json::to_string(&sync_manager.initialiser_data)
         {
             let _ = fs::write(
-                PathBuf::from(ROOT_FOLDER_NAME).join(format!(
+                PathBuf::from(
+                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                        .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
+                )
+                .join(format!(
                     "{client_id}{CLIENT_SYNC_INITIALISER_FILENAME_SUFFIX}"
                 )),
                 &serialised_initialiser_data,
@@ -215,13 +222,21 @@ fn sync_channel(
                 }
             }
             let _ = fs::write(
-                PathBuf::from(ROOT_FOLDER_NAME).join(format!(
+                PathBuf::from(
+                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                        .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
+                )
+                .join(format!(
                     "{PREVIOUS_PREFIX}{client_id}{LAST_SYNCED_SERVER_LIST_FILENAME_SUFFIX}"
                 )),
                 serde_json::to_string(&sync_manager.server_file_list).unwrap(),
             );
             let _ = fs::write(
-                PathBuf::from(ROOT_FOLDER_NAME).join(format!(
+                PathBuf::from(
+                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                        .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
+                )
+                .join(format!(
                     "{PREVIOUS_PREFIX}{client_id}{CLIENT_FOLDER_LIST_FILENAME_SUFFIX}"
                 )),
                 serde_json::to_string(&sync_manager.list_of_folder_ids).unwrap(),
@@ -234,7 +249,14 @@ fn sync_channel(
 
 #[launch]
 fn rocket() -> _ {
-    let _ = fs::create_dir_all(PathBuf::from(ROOT_FOLDER_NAME).join("web_data").join("www"));
+    let _ = fs::create_dir_all(
+        PathBuf::from(
+            std::env::var("IDIRFEIN_ROOT_FOLDER")
+                .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
+        )
+        .join("web_data")
+        .join("www"),
+    );
 
     rocket::build()
         .configure(rocket::Config {
@@ -252,7 +274,12 @@ fn rocket() -> _ {
         .mount(
             "/blog",
             FileServer::new(
-                PathBuf::from(ROOT_FOLDER_NAME).join("web_data").join("www"),
+                PathBuf::from(
+                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                        .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
+                )
+                .join("web_data")
+                .join("www"),
                 Options::default(),
             ),
         )

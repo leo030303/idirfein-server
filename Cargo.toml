@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-dirs = "6.0.0"
 fast_rsync = "0.2.0"
 rocket = { version = "0.5.1", features = ["tls"] }
 serde = "1.0.217"

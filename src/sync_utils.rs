@@ -9,8 +9,6 @@ use std::fs::File;
 use std::{fs, os::unix::fs::MetadataExt, path::PathBuf};
 use walkdir::WalkDir;
 
-use crate::ROOT_FOLDER_NAME;
-
 const DEFAULT_CRYPTO_HASH_SIZE: u32 = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,9 +21,10 @@ pub struct SyncInitialiserData {
 pub fn get_first_sync_data() -> HashMap<String, Vec<String>> {
     let mut list_of_paths_dict: HashMap<String, Vec<String>> = HashMap::new();
 
-    let root_dir = dirs::home_dir()
-        .expect("No Home dir found, very strange, what weird OS are you running?")
-        .join(ROOT_FOLDER_NAME);
+    let root_dir = PathBuf::from(
+        std::env::var("IDIRFEIN_ROOT_FOLDER")
+            .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
+    );
     let list_of_folder_ids: Vec<String> = fs::read_dir(&root_dir)
         .unwrap()
         .filter_map(|item| item.ok().map(|item| item.path()))
@@ -105,9 +104,10 @@ pub struct SyncManager {
 
 impl SyncManager {
     pub fn new(client_id: &str, initialiser_data: SyncInitialiserData) -> Self {
-        let root_dir = dirs::home_dir()
-            .expect("No Home dir found, very strange, what weird OS are you running?")
-            .join(ROOT_FOLDER_NAME);
+        let root_dir = PathBuf::from(
+            std::env::var("IDIRFEIN_ROOT_FOLDER")
+                .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
+        );
         let list_of_folder_ids = fs::read_dir(&root_dir)
             .unwrap()
             .filter_map(|item| item.ok().map(|item| item.path()))
@@ -116,24 +116,26 @@ impl SyncManager {
             .collect();
         let previously_synced_server_file_list = serde_json::from_str(
             &fs::read_to_string(
-                dirs::home_dir()
-                    .expect("No Home dir found, very strange, what weird OS are you running?")
-                    .join(ROOT_FOLDER_NAME)
-                    .join(format!(
-                        "{PREVIOUS_PREFIX}{client_id}{LAST_SYNCED_SERVER_LIST_FILENAME_SUFFIX}"
-                    )),
+                PathBuf::from(
+                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                        .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
+                )
+                .join(format!(
+                    "{PREVIOUS_PREFIX}{client_id}{LAST_SYNCED_SERVER_LIST_FILENAME_SUFFIX}"
+                )),
             )
             .unwrap_or_default(),
         )
         .unwrap_or_default();
         let previously_synced_list_of_folder_ids = serde_json::from_str(
             &fs::read_to_string(
-                dirs::home_dir()
-                    .expect("No Home dir found, very strange, what weird OS are you running?")
-                    .join(ROOT_FOLDER_NAME)
-                    .join(format!(
-                        "{PREVIOUS_PREFIX}{client_id}{CLIENT_FOLDER_LIST_FILENAME_SUFFIX}"
-                    )),
+                PathBuf::from(
+                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                        .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
+                )
+                .join(format!(
+                    "{PREVIOUS_PREFIX}{client_id}{CLIENT_FOLDER_LIST_FILENAME_SUFFIX}"
+                )),
             )
             .unwrap_or_default(),
         )
