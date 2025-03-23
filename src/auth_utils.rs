@@ -1,15 +1,19 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fs, path::Path};
 
-fn get_client_auth_list() -> HashMap<String, String> {
-    // TODO Read this from config
-    let mut auth_list = HashMap::new();
-    auth_list.insert(String::from("Leo"), String::from("12345"));
+use totp_rs::{Algorithm, TOTP};
+
+fn get_client_auth_list() -> HashMap<String, Vec<u8>> {
+    let config_file_path = Path::new("/usr/local/share/idirfein_server/users.json");
+    let config_json = fs::read_to_string(config_file_path).expect("Couldn't read users file");
+    let auth_list: HashMap<String, Vec<u8>> =
+        serde_json::from_str(&config_json).expect("Malformed users file");
     auth_list
 }
 
-fn calculate_totp_token(totp_seed: &str) -> String {
-    // TODO calculate properly
-    totp_seed.to_string()
+fn calculate_totp_token(totp_seed: &[u8]) -> String {
+    let totp =
+        TOTP::new(Algorithm::SHA1, 6, 1, 30, totp_seed.to_vec()).expect("Invalid credentials");
+    totp.generate_current().expect("Invalid credentials")
 }
 
 pub fn authorise(client_id: &str, auth_token: &str) -> bool {
