@@ -22,35 +22,12 @@ pub const LAST_SYNCED_SERVER_LIST_FILENAME_SUFFIX: &str = "_last_used_server_fil
 pub const CLIENT_SYNC_INITIALISER_FILENAME_SUFFIX: &str = "_sync_initialiser.json";
 pub const CLIENT_FOLDER_LIST_FILENAME_SUFFIX: &str = "_sync_folder_list.json";
 pub const PREVIOUS_PREFIX: &str = "previous_";
+pub const LORO_NOTE_ID: &str = "LORO_NOTE_ID";
+pub const IDIRFEIN_ROOT_FOLDER_ENV_VAR: &str = "IDIRFEIN_ROOT_FOLDER";
 
 #[get("/", rank = 2)]
 fn redirect_to_blog() -> Redirect {
-    Redirect::permanent(uri!("/blog"))
-}
-
-#[get("/", rank = 1)]
-fn loro_channel(ws: ws::WebSocket) -> ws::Channel<'static> {
-    use rocket::futures::{SinkExt, StreamExt};
-
-    ws.channel(move |mut stream| {
-        Box::pin(async move {
-            while let Some(message_result) = stream.next().await {
-                println!("Loro message: {message_result:?}");
-                if let Ok(message) = message_result {
-                    let _ = stream
-                        .send(Message::text(format!(
-                            "Your loro message was: {}",
-                            message.into_text().unwrap()
-                        )))
-                        .await;
-                } else {
-                    println!("Error with loro message: {message_result:?}");
-                }
-            }
-
-            Ok(())
-        })
-    })
+    Redirect::permanent(uri!("/blog/index.html"))
 }
 
 struct AuthToken();
@@ -100,7 +77,7 @@ impl<'r> FromRequest<'r> for IsInitialised {
     async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         if let Some(Ok(client_id)) = req.query_value::<&str>("client_id") {
             let sync_data_path = PathBuf::from(
-                std::env::var("IDIRFEIN_ROOT_FOLDER")
+                std::env::var(IDIRFEIN_ROOT_FOLDER_ENV_VAR)
                     .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
             )
             .join(format!(
@@ -175,7 +152,7 @@ fn initialise_sync(
         {
             let _ = fs::write(
                 PathBuf::from(
-                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                    std::env::var(IDIRFEIN_ROOT_FOLDER_ENV_VAR)
                         .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
                 )
                 .join(format!(
@@ -223,7 +200,7 @@ fn sync_channel(
             }
             let _ = fs::write(
                 PathBuf::from(
-                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                    std::env::var(IDIRFEIN_ROOT_FOLDER_ENV_VAR)
                         .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
                 )
                 .join(format!(
@@ -233,7 +210,7 @@ fn sync_channel(
             );
             let _ = fs::write(
                 PathBuf::from(
-                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                    std::env::var(IDIRFEIN_ROOT_FOLDER_ENV_VAR)
                         .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
                 )
                 .join(format!(
@@ -251,7 +228,7 @@ fn sync_channel(
 fn rocket() -> _ {
     let _ = fs::create_dir_all(
         PathBuf::from(
-            std::env::var("IDIRFEIN_ROOT_FOLDER")
+            std::env::var(IDIRFEIN_ROOT_FOLDER_ENV_VAR)
                 .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
         )
         .join("web_data")
@@ -269,13 +246,12 @@ fn rocket() -> _ {
             ..Default::default()
         })
         .mount("/", routes![redirect_to_blog])
-        .mount("/loro", routes![loro_channel])
         .mount("/sync", routes![sync_channel, initialise_sync, first_sync])
         .mount(
             "/blog",
             FileServer::new(
                 PathBuf::from(
-                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                    std::env::var(IDIRFEIN_ROOT_FOLDER_ENV_VAR)
                         .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
                 )
                 .join("web_data")

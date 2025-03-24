@@ -1,8 +1,11 @@
 use crate::CLIENT_FOLDER_LIST_FILENAME_SUFFIX;
+use crate::IDIRFEIN_ROOT_FOLDER_ENV_VAR;
 use crate::LAST_SYNCED_SERVER_LIST_FILENAME_SUFFIX;
+use crate::LORO_NOTE_ID;
 use crate::PREVIOUS_PREFIX;
 use fast_rsync::Signature;
 use fast_rsync::SignatureOptions;
+use loro::LoroDoc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
@@ -22,7 +25,7 @@ pub fn get_first_sync_data() -> HashMap<String, Vec<String>> {
     let mut list_of_paths_dict: HashMap<String, Vec<String>> = HashMap::new();
 
     let root_dir = PathBuf::from(
-        std::env::var("IDIRFEIN_ROOT_FOLDER")
+        std::env::var(IDIRFEIN_ROOT_FOLDER_ENV_VAR)
             .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
     );
     let list_of_folder_ids: Vec<String> = fs::read_dir(&root_dir)
@@ -67,6 +70,8 @@ pub enum ServerFileRequest {
     CreateFile(Vec<u8>, PathBuf, String),
     /// The file at the given index should be deleted on the client
     Delete(usize),
+    /// The loro file at the given index is being requested to update the server file, and the server loro file is given to update the client version
+    RequestLoroUpdate(usize, Vec<u8>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +82,8 @@ pub enum ClientFileResponse {
     Signature(usize, Vec<u8>),
     /// The response to RequestDiff
     Diff(usize, Vec<u8>),
+    /// The response to RequestLoroUpdate
+    LoroUpdate(usize, Vec<u8>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,7 +112,7 @@ pub struct SyncManager {
 impl SyncManager {
     pub fn new(client_id: &str, initialiser_data: SyncInitialiserData) -> Self {
         let root_dir = PathBuf::from(
-            std::env::var("IDIRFEIN_ROOT_FOLDER")
+            std::env::var(IDIRFEIN_ROOT_FOLDER_ENV_VAR)
                 .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
         );
         let list_of_folder_ids = fs::read_dir(&root_dir)
@@ -117,7 +124,7 @@ impl SyncManager {
         let previously_synced_server_file_list = serde_json::from_str(
             &fs::read_to_string(
                 PathBuf::from(
-                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                    std::env::var(IDIRFEIN_ROOT_FOLDER_ENV_VAR)
                         .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
                 )
                 .join(format!(
@@ -130,7 +137,7 @@ impl SyncManager {
         let previously_synced_list_of_folder_ids = serde_json::from_str(
             &fs::read_to_string(
                 PathBuf::from(
-                    std::env::var("IDIRFEIN_ROOT_FOLDER")
+                    std::env::var(IDIRFEIN_ROOT_FOLDER_ENV_VAR)
                         .unwrap_or(String::from("/mnt/idirfein_data/idirfein_sync_data")),
                 )
                 .join(format!(
@@ -249,7 +256,16 @@ impl SyncManager {
                         // If server file is marked as deleted, delete it from the client
                         requests_to_send.push(ServerFileRequest::Delete(client_index));
                     } else if client_file.size != server_file.size {
-                        if client_file.modification_time >= server_file.modification_time {
+                        if client_file
+                            .relative_path
+                            .extension()
+                            .is_some_and(|extension| extension.to_string_lossy() == "loro")
+                        {
+                            requests_to_send.push(ServerFileRequest::RequestLoroUpdate(
+                                client_index,
+                                self.get_file_bytes(server_file),
+                            ));
+                        } else if client_file.modification_time >= server_file.modification_time {
                             // If size differs and client file is newer, request a diff
                             requests_to_send.push(ServerFileRequest::RequestDiff(
                                 client_index,
@@ -330,6 +346,33 @@ impl SyncManager {
                     .unwrap();
                     let _ =
                         fast_rsync::apply(&server_file_bytes, &diff_bytes, &mut server_file_handle);
+                }
+            }
+            ClientFileResponse::LoroUpdate(file_index, client_loro_bytes) => {
+                if let Some(client_file) = self.initialiser_data.client_file_list.get(file_index) {
+                    let server_loro_file_bytes = self.get_file_bytes(client_file);
+                    let server_doc = LoroDoc::new();
+                    let _ = server_doc.import(&server_loro_file_bytes);
+                    let _ = server_doc.import(&client_loro_bytes);
+                    let new_server_bytes = server_doc.export(loro::ExportMode::Snapshot).unwrap();
+                    let _ = fs::write(
+                        self.root_dir
+                            .join(&client_file.folder_id)
+                            .join(&client_file.relative_path),
+                        new_server_bytes,
+                    );
+                    let base_file_path = self.root_dir.join(&client_file.folder_id).join(
+                        client_file
+                            .relative_path
+                            .file_stem()
+                            .unwrap()
+                            .to_string_lossy()
+                            .chars()
+                            .skip(1)
+                            .collect::<String>(),
+                    );
+                    let updated_base_file_text = server_doc.get_text(LORO_NOTE_ID).to_string();
+                    let _ = fs::write(base_file_path, updated_base_file_text);
                 }
             }
         }
